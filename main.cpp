@@ -18,25 +18,35 @@ namespace cmd_interpreter
     const unsigned char SUB = 0x07;
     const unsigned char MUT = 0x08;
     const unsigned char DIV = 0x09;
+    const unsigned char LOPDN = 0x0A;
     const unsigned char DUMP = 0xFF;
 
-    const char valid_commands[] = {NOP, IF, SRG, GOTO, INCR, DECR, ADD, SUB, MUT, DIV, DUMP};
+    const char valid_commands[] = {NOP, IF, SRG, GOTO, INCR, DECR, ADD, SUB, MUT, DIV, DUMP, LOPDN};
   }
 
-  const int max_program_length = 10;
-  const int max_instruction_args = 4; // THIS INCLUDES THE INITAL COMMAND
-  const int prog_data_register_size = 10;
+  const int max_program_length = 100;
+  const int max_instruction_args = 4;    // THIS INCLUDES THE INITAL COMMAND
+  const int prog_data_register_size = 4; // 16 should be a good amount
+  const int cmd_run_delay = 500;         // How offten the interpter should run
+  const int max_cpu_usage_time = 1;      // max time that the interupter can keep the CPU buzy
 
   volatile unsigned char program_space[max_program_length][max_instruction_args]; // dataspace for the program to run
   volatile int program_IO_data_register[prog_data_register_size];                 // Store the programs running data
 
-  namespace setup
+  namespace setup // Where the IO setup inforation lives
   {
-    struct program_setup
+    enum io_direction // Remote addon to register direction
+    {
+      REG_INPUT = 0,
+      REG_OUTPUT = 1
+    };
+
+    struct program_setup // holds pin and dir data for remote devices
     {
       bool pin_used_for_io = false;
       int addon_address = 0;
       int addon_register = 0;
+      io_direction dir = REG_INPUT;
     };
 
     program_setup register_usage[prog_data_register_size]; // The setup that the io function will read
@@ -62,10 +72,11 @@ namespace cmd_interpreter
       if (!_error)
       {
         for (size_t i = 0; i < prog_data_register_size; i++)
-        { //load the user setup into the program array
+        { // load the user setup into the program array
           register_usage[i].addon_address = setup[i].addon_address;
           register_usage[i].addon_register = setup[i].addon_register;
           register_usage[i].pin_used_for_io = setup[i].pin_used_for_io;
+          register_usage[i].dir = setup[i].dir;
         }
       }
 
@@ -73,20 +84,62 @@ namespace cmd_interpreter
     }
   }
 
-  namespace status
+  namespace status // Common varables for controlling script execution
   {
-    bool running = false;
-    bool dev_dump_before_every_command = false;
+    //-----EXECUTION CONTROLL------//
+    bool running = false;                       // IF false, the interpter will not run.
+    bool dev_dump_before_every_command = false; // Enable to get a register dump every instruction
+    bool loop_done = false;                     // Used by the LUPDN command, when set true, the scripts execution will pause untel the next loop time
+    //-----EXECUTION TIME CONTROLL------//
+    unsigned long last_cmd_run = 0; // last time that the interupter was able to run
 
   }
 
-  // Thoughts on IO
-  //   In usage, a function will refrence the IO registers peroticly to set pre-deffined output devices based on the value of the registers,
-  // This will need to be fleshed out more later
-
-  // check program, then load it into program space
-  bool load_program(volatile unsigned char prog[max_program_length][max_instruction_args])
+  void update_output_devices()
   {
+    for (size_t i = 0; i < prog_data_register_size; i++)
+    {
+      if (setup::register_usage[i].pin_used_for_io)
+      { // if the register is used for io
+        if (setup::register_usage[i].dir == setup::REG_OUTPUT)
+        { // OUTPUT DEVICE
+          //  update the output (if it needs it...)
+          //@TODO intigrate this into the remote IO devices
+          Serial.print("[");
+          Serial.print(i);
+          Serial.print("] ");
+          Serial.print(program_IO_data_register[i]);
+          Serial.print("R  ->  D");
+          Serial.println(setup::register_usage[i].addon_address);
+        }
+      }
+    }
+  }
+
+  void update_input_devices()
+  {
+
+    for (size_t i = 0; i < prog_data_register_size; i++)
+    {
+      if (setup::register_usage[i].pin_used_for_io)
+      { // if the register is used for io
+        if (setup::register_usage[i].dir == setup::REG_INPUT)
+        { // INPUT DEVICE
+          // Read the remote IO device
+          // update the register to reflect the IO device
+          Serial.print("[");
+          Serial.print(i);
+          Serial.print("] ");
+          Serial.print(program_IO_data_register[i]);
+          Serial.print("R  <-  D");
+          Serial.println(setup::register_usage[i].addon_address);
+        }
+      }
+    }
+  }
+
+  bool load_program(volatile unsigned char prog[max_program_length][max_instruction_args])
+  { // check program, then load it into program space
     bool load_error = false;
 
     // check that all commands are valid
@@ -180,6 +233,7 @@ namespace cmd_interpreter
     //                                     OPP      ARG 1         ARG 2
     //    Set a value in the register      0x02 -- location,      value
     //    GOTO                             0x03 -- line number
+    //    LOOP_DONE                        0x0A -- no args, when a program loop is done, this insturction must be called to allow the main cpu tasks continue
     //    Incriment register               0x04 -- register
     //    Decrement register               0x05 -- register
     //----------------------(INT MATH ONLY)----------------------------
@@ -407,6 +461,7 @@ namespace cmd_interpreter
       break;
 
     case cmds::DUMP: // DUMP PROG_IO_REG
+      Serial.println("------------------------");
       Serial.print(" PC -> ");
       Serial.println(program_IO_data_register[0]);
 
@@ -418,6 +473,11 @@ namespace cmd_interpreter
         Serial.print(" -> ");
         Serial.println(program_IO_data_register[i]);
       }
+      Serial.println("------------------------");
+      break;
+
+    case cmds::LOPDN: // LOOP DONE
+      status::loop_done = true;
       break;
 
     default:
@@ -435,39 +495,74 @@ namespace cmd_interpreter
     }
 
   } // Intrupter
+
+  void run()
+  {
+    if ((millis() > status::last_cmd_run + cmd_run_delay) && cmd_interpreter::status::running)
+    {
+      update_input_devices(); // read from remote IO devices
+
+      status::loop_done = false;
+
+      unsigned long start_time = millis();
+
+      while (!status::loop_done)
+      {
+        cmd_interpreter(); // Take a single step
+
+        if (millis() > start_time + max_cpu_usage_time)
+        { // If the program seems hung up, stop running and give the main program some CPU time
+          status::loop_done = true;
+          Serial.println("BRAKE!! cpu time exceaded...\n make sure you are using the LOPDN command\n if you are sure the prog is running correctly, try upping max_cpu_usage_time");
+        }
+      }
+
+      update_output_devices(); // Write to the remote IO devices
+
+      status::last_cmd_run = millis(); // Wait some time before going more(perhaps we should try and keep this executing at a known frequency)
+    }
+  }
 } // Namespace
 
 cmd_interpreter::setup::program_setup test_program_0_setup[cmd_interpreter::prog_data_register_size];
 
 void setup_program_0()
 {
-  test_program_0_setup[9].pin_used_for_io = true;
-  test_program_0_setup[9].addon_address = 0x15;
-  test_program_0_setup[9].addon_register = 0;
+  test_program_0_setup[1].pin_used_for_io = true;
+  test_program_0_setup[1].addon_address = 0x02;
+  test_program_0_setup[1].addon_register = 0;
+  test_program_0_setup[1].dir = cmd_interpreter::setup::REG_OUTPUT;
+
+  test_program_0_setup[2].pin_used_for_io = true;
+  test_program_0_setup[2].addon_address = 0x01;
+  test_program_0_setup[2].addon_register = 0;
+  test_program_0_setup[2].dir = cmd_interpreter::setup::REG_INPUT;
 }
 
-volatile unsigned char test_program_0[10][4] = {
+volatile unsigned char test_program_0[cmd_interpreter::max_program_length][cmd_interpreter::max_instruction_args] = {
     // CMD,ARG,  ARG,  ARG
     0x02, 0x02, 0xFF, 0x00, // 0 |SET Reg2 ->256
     0x09, 0xF2, 0x02, 0x02, // 1 |reg 2 / 2 -> reg2
-    0xFF, 0x00, 0x00, 0x00, // 2 |DUMP
-    0x01, 0xF2, 0x02, 0x40, // 3 |IF reg2 < 2
-    0x03, 0x00, 0x00, 0x00, // 4 | goto 0 //reset the vals to keep deviding
-    0x03, 0x01, 0x00, 0x00, // 5 |goto 1  //skip setting the value
-    0x00, 0x00, 0x00, 0x00, // 6 |
+    0x0A, 0x00, 0x00, 0x00, // 2 |Loop done, prog will wait here after a run through
+    0xFF, 0x00, 0x00, 0x00, // 3
+    0x01, 0xF2, 0x02, 0x40, // 4 |IF reg2 < 2
+    0x03, 0x00, 0x00, 0x00, // 5 | goto 0 //reset the vals to keep deviding
+    0x03, 0x01, 0x00, 0x00, // 6 |goto 1  //skip setting the value
     0x00, 0x00, 0x00, 0x00, // 7 |
     0x00, 0x00, 0x00, 0x00, // 8 |
-    0x00, 0x00, 0x00, 0x00  // 9 |
+    0x00, 0x00, 0x00, 0x00, // 9 |
+    0x00, 0x00, 0x00, 0x00  // 10|
 };
 
 void setup()
 {
   Serial.begin(115200);
-  Serial.println("--ESP CMD EATER STARTED--");
+  Serial.println("--G.S.L. STARTED--");
   // Setup the pins
   setup_program_0();
 
   // Load program and setup info
+  Serial.println("LOADING PROGRAM...");
   if (!cmd_interpreter::load_program(test_program_0) && !cmd_interpreter::setup::load_setup(test_program_0_setup))
   {
     Serial.println("LOAD DONE, STARTING PROGRAM");
@@ -480,16 +575,7 @@ void setup()
   }
 }
 
-unsigned long last_cmd_run = 0;
-const int cmd_run_delay = 500;
-
 void loop()
 {
-  if ((millis() > last_cmd_run + cmd_run_delay) && cmd_interpreter::status::running)
-  {
-    // run the commands
-    cmd_interpreter::cmd_interpreter(); // Take a single step
-
-    last_cmd_run = millis();
-  }
+  cmd_interpreter::run();
 }
