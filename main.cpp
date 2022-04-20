@@ -21,10 +21,23 @@ namespace cmd_interpreter
     const unsigned char LOPDN = 0x0A;
     const unsigned char DUMP = 0xFF;
 
+    const char *NOP_pretty = "NOP ";
+    const char *IF_pretty = "IF  ";
+    const char *SRG_pretty = "SRG ";
+    const char *GOTO_pretty = "GOTO";
+    const char *INCR_pretty = "INCR";
+    const char *DECR_pretty = "DECR";
+    const char *ADD_pretty = "ADD ";
+    const char *SUB_pretty = "SUB ";
+    const char *MUT_pretty = "MUT ";
+    const char *DIV_pretty = "DIV ";
+    const char *LOPDN_pretty = "LPDN";
+    const char *DUMP_pretty = "DUMP";
+
     const char valid_commands[] = {NOP, IF, SRG, GOTO, INCR, DECR, ADD, SUB, MUT, DIV, DUMP, LOPDN};
   }
 
-  const int max_program_length = 100;
+  const int max_program_length = 11;
   const int max_instruction_args = 4;    // THIS INCLUDES THE INITAL COMMAND
   const int prog_data_register_size = 4; // 16 should be a good amount
   const int cmd_run_delay = 500;         // How offten the interpter should run
@@ -32,6 +45,20 @@ namespace cmd_interpreter
 
   volatile unsigned char program_space[max_program_length][max_instruction_args]; // dataspace for the program to run
   volatile int program_IO_data_register[prog_data_register_size];                 // Store the programs running data
+
+  namespace debug
+  {
+
+    void print_pretty_hex(int num)
+    {
+      Serial.print("0x");
+      if (num < 16)
+      {
+        Serial.print("0");
+      }
+      Serial.print(num, HEX);
+    }
+  }
 
   namespace setup // Where the IO setup inforation lives
   {
@@ -90,6 +117,14 @@ namespace cmd_interpreter
     bool running = false;                       // IF false, the interpter will not run.
     bool dev_dump_before_every_command = false; // Enable to get a register dump every instruction
     bool loop_done = false;                     // Used by the LUPDN command, when set true, the scripts execution will pause untel the next loop time
+
+    unsigned char minimum_error_level_to_print = 0xff; // what level of errors to print
+
+    //------Debugging controll-----//
+    bool visual_debug_mode = true; // enable to start the visual debugger
+    bool visual_debug_enable_inputs = false;
+    bool visual_debug_enable_outputs = false;
+
     //-----EXECUTION TIME CONTROLL------//
     unsigned long last_cmd_run = 0; // last time that the interupter was able to run
 
@@ -212,11 +247,20 @@ namespace cmd_interpreter
     return _ret;
   }
 
-  void error_handler(uint8_t err_level, const char *log_msg)
+  void error_handler(unsigned char err_level, const char *log_msg, int log_val)
   {
     // Thoughts on Error handling
     //  If there is an error, halt execution, and report the error to ~some~ error handler
     // Print out error messages ~prettly~
+    if (err_level >= status::minimum_error_level_to_print)
+    {
+      Serial.print("E_LV[ ");
+      Serial.print(err_level);
+      Serial.print("]ERR_MSG[ ");
+      Serial.print(log_msg);
+      Serial.print("] VAL: ");
+      Serial.print(log_val);
+    }
   }
 
   void cmd_interpreter()
@@ -297,7 +341,7 @@ namespace cmd_interpreter
 
     if (!status::running)
     {
-      Serial.println("PROGRAM COMPLEATE -- NOTHING TO RUN");
+      error_handler(0x01, "PROGRAM COMPLEATE -- NOTHING TO RUN", 0);
       return;
     }
 
@@ -461,6 +505,10 @@ namespace cmd_interpreter
       break;
 
     case cmds::DUMP: // DUMP PROG_IO_REG
+      if (status::visual_debug_mode)
+      {
+        break;
+      }
       Serial.println("------------------------");
       Serial.print(" PC -> ");
       Serial.println(program_IO_data_register[0]);
@@ -481,8 +529,7 @@ namespace cmd_interpreter
       break;
 
     default:
-      Serial.print(program_space[program_IO_data_register[0]][0]);
-      Serial.println(" : NOT FOUND");
+      error_handler(0xFF, "Instruction not found", program_space[program_IO_data_register[0]][0]);
       break;
     }
 
@@ -496,30 +543,156 @@ namespace cmd_interpreter
 
   } // Intrupter
 
-  void run()
+  void load_program(volatile unsigned char _program[cmd_interpreter::max_program_length][cmd_interpreter::max_instruction_args],
+                    cmd_interpreter::setup::program_setup _register_setup[cmd_interpreter::prog_data_register_size])
   {
-    if ((millis() > status::last_cmd_run + cmd_run_delay) && cmd_interpreter::status::running)
+
+    // Load program and setup info
+    Serial.println("LOADING PROGRAM...");
+    if (!cmd_interpreter::load_program(_program) && !cmd_interpreter::setup::load_setup(_register_setup))
     {
-      update_input_devices(); // read from remote IO devices
+      Serial.println("LOAD DONE, STARTING PROGRAM");
 
-      status::loop_done = false;
+      cmd_interpreter::status::running = true; // Set to true to allow execution
+    }
+    else
+    {
+      Serial.println("LOAD FAILED");
+    }
+  }
 
-      unsigned long start_time = millis();
+  void run() // Execute the script (call as often as you like)
+  {
 
-      while (!status::loop_done)
+    if (!status::visual_debug_mode)
+    {
+      if ((millis() > status::last_cmd_run + cmd_run_delay) && cmd_interpreter::status::running)
       {
-        cmd_interpreter(); // Take a single step
+        update_input_devices(); // read from remote IO devices
 
-        if (millis() > start_time + max_cpu_usage_time)
-        { // If the program seems hung up, stop running and give the main program some CPU time
-          status::loop_done = true;
-          Serial.println("BRAKE!! cpu time exceaded...\n make sure you are using the LOPDN command\n if you are sure the prog is running correctly, try upping max_cpu_usage_time");
+        status::loop_done = false;
+
+        unsigned long start_time = millis();
+
+        while (!status::loop_done)
+        {
+          cmd_interpreter(); // Take a single step
+
+          if (millis() > start_time + max_cpu_usage_time)
+          { // If the program seems hung up, stop running and give the main program some CPU time
+            status::loop_done = true;
+            Serial.println("BRAKE!! cpu time exceaded...\n make sure you are using the LOPDN command\n if you are sure the prog is running correctly, try upping max_cpu_usage_time");
+          }
         }
+        update_output_devices();         // Write to the remote IO devices
+        status::last_cmd_run = millis(); // Wait some time before going more(perhaps we should try and keep this executing at a known frequency)
+      }
+    }
+    else
+    { // Welcome to the deugging mode!
+
+      // dump the program to serial display, with PC having a pointer to the current instruction
+      Serial.write(0xC); // clear the screen some
+      Serial.println("---------------------");
+      for (size_t i = 0; i < cmd_interpreter::max_program_length; i++)
+      { // for every instruction
+        // Print the name
+        switch (program_space[i][0]) // print the name
+        {
+        case cmds::NOP:
+          Serial.print(cmds::NOP_pretty);
+          break;
+
+        case cmds::IF:
+          Serial.print(cmds::IF_pretty);
+          break;
+
+        case cmds::SRG:
+          Serial.print(cmds::SRG_pretty);
+          break;
+
+        case cmds::GOTO:
+          Serial.print(cmds::GOTO_pretty);
+          break;
+
+        case cmds::INCR:
+          Serial.print(cmds::INCR_pretty);
+          break;
+
+        case cmds::DECR:
+          Serial.print(cmds::DECR_pretty);
+          break;
+
+        case cmds::ADD:
+          Serial.print(cmds::ADD_pretty);
+          break;
+
+        case cmds::SUB:
+          Serial.print(cmds::SUB_pretty);
+          break;
+
+        case cmds::MUT:
+          Serial.print(cmds::MUT_pretty);
+          break;
+
+        case cmds::DIV:
+          Serial.print(cmds::DIV_pretty);
+          break;
+
+        case cmds::LOPDN:
+          Serial.print(cmds::LOPDN_pretty);
+          break;
+
+        case cmds::DUMP:
+          Serial.print(cmds::DUMP_pretty);
+          break;
+
+        default:
+          Serial.print("----");
+          break;
+        }
+
+        Serial.print(" "); // Space between cmd name and data
+
+        for (size_t x = 1; x < cmd_interpreter::max_instruction_args; x++)
+        { // prnt the data
+
+          debug::print_pretty_hex(program_space[i][x]);
+          Serial.print(",");
+        }
+
+        if (i == program_IO_data_register[0]) // Draw program counter pointer
+        {
+          Serial.print(" <---");
+        }
+
+        Serial.println(""); // NEW LINE
       }
 
-      update_output_devices(); // Write to the remote IO devices
+      // Print the Current prog io register
+      Serial.println("------------");
+      Serial.println("IO REGISTERS");
+      for (size_t i = 0; i < prog_data_register_size; i++)
+      { // For every element in the data register
+        Serial.print("  [");
+        Serial.print(i);
+        Serial.print("]=");
+        Serial.print(program_IO_data_register[i]); // Print value
+      }
+      Serial.println(""); // New line after program counter
 
-      status::last_cmd_run = millis(); // Wait some time before going more(perhaps we should try and keep this executing at a known frequency)
+      if (status::visual_debug_enable_inputs)
+      {
+        update_input_devices(); // Read input devices
+      }
+
+      cmd_interpreter(); // take a step
+
+      if (status::visual_debug_enable_outputs)
+      {
+        update_output_devices();
+      }
+      delay(1000); // debugging delay
     }
   }
 } // Namespace
@@ -541,17 +714,16 @@ void setup_program_0()
 
 volatile unsigned char test_program_0[cmd_interpreter::max_program_length][cmd_interpreter::max_instruction_args] = {
     // CMD,ARG,  ARG,  ARG
-    0x02, 0x02, 0xFF, 0x00, // 0 |SET Reg2 ->256
-    0x09, 0xF2, 0x02, 0x02, // 1 |reg 2 / 2 -> reg2
-    0x0A, 0x00, 0x00, 0x00, // 2 |Loop done, prog will wait here after a run through
-    0xFF, 0x00, 0x00, 0x00, // 3
-    0x01, 0xF2, 0x02, 0x40, // 4 |IF reg2 < 2
-    0x03, 0x00, 0x00, 0x00, // 5 | goto 0 //reset the vals to keep deviding
-    0x03, 0x01, 0x00, 0x00, // 6 |goto 1  //skip setting the value
-    0x00, 0x00, 0x00, 0x00, // 7 |
-    0x00, 0x00, 0x00, 0x00, // 8 |
-    0x00, 0x00, 0x00, 0x00, // 9 |
-    0x00, 0x00, 0x00, 0x00  // 10|
+    0x02, 0x02, 0xFF, 0,   // 0 |SET Reg2 ->256
+    0x09, 0xF2, 0x2, 0x02, // 1 |reg 2 / 2 -> reg2
+    0xFF, 0, 0, 0,         // 2 |DUMP
+    0x01, 0xF2, 2, 0x40,   // 3 |IF reg2 < 2
+    0x03, 0, 0, 0,         // 4 | goto 0 //reset the vals to keep deviding
+    0x03, 1, 0, 0,         // 5 |goto 1  //skip setting the value
+    0, 0, 0, 0,            // 6 |
+    0, 0, 0, 0,            // 7 |
+    0, 0, 0, 0,            // 8 |
+    0, 0, 0, 0             // 9 |
 };
 
 void setup()
@@ -559,20 +731,8 @@ void setup()
   Serial.begin(115200);
   Serial.println("--G.S.L. STARTED--");
   // Setup the pins
-  setup_program_0();
-
-  // Load program and setup info
-  Serial.println("LOADING PROGRAM...");
-  if (!cmd_interpreter::load_program(test_program_0) && !cmd_interpreter::setup::load_setup(test_program_0_setup))
-  {
-    Serial.println("LOAD DONE, STARTING PROGRAM");
-
-    cmd_interpreter::status::running = true; // Set to true to allow execution
-  }
-  else
-  {
-    Serial.println("LOAD FAILED");
-  }
+  setup_program_0();                                                   // There is likely a better way to do this, but irl this will be on the fly loading, sooooo..... probbably good enough
+  cmd_interpreter::load_program(test_program_0, test_program_0_setup); // Load program
 }
 
 void loop()
