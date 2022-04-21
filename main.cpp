@@ -1,7 +1,7 @@
 #include <Arduino.h>
 
 using namespace std;
-#define DEBUGGER_OUTPUT Serial1
+#define DEBUGGER_OUTPUT Serial
 #define DEBUG_SCREEN Serial // What is used for the debugger
 namespace cmd_interpreter
 {
@@ -21,6 +21,8 @@ namespace cmd_interpreter
     const unsigned char MUT = 0x08;
     const unsigned char DIV = 0x09;
     const unsigned char LOPDN = 0x0A;
+
+    const unsigned char HALT = 0xFE;
     const unsigned char DUMP = 0xFF;
 
     const char *NOP_pretty = "NOP ";
@@ -34,9 +36,10 @@ namespace cmd_interpreter
     const char *MUT_pretty = "MUT ";
     const char *DIV_pretty = "DIV ";
     const char *LOPDN_pretty = "LPDN";
+    const char *HALT_pretty = "HALT";
     const char *DUMP_pretty = "DUMP";
 
-    const char valid_commands[] = {NOP, IF, SRG, GOTO, INCR, DECR, ADD, SUB, MUT, DIV, DUMP, LOPDN};
+    const char valid_commands[] = {NOP, IF, SRG, GOTO, INCR, DECR, ADD, SUB, MUT, DIV, DUMP, LOPDN, HALT};
   }
 
   const int max_program_length = 16;
@@ -111,6 +114,10 @@ namespace cmd_interpreter
 
       case cmds::DUMP:
         DEBUG_SCREEN.print(cmds::DUMP_pretty);
+        break;
+
+      case cmds::HALT:
+        DEBUG_SCREEN.print(cmds::HALT_pretty);
         break;
 
       default:
@@ -340,6 +347,7 @@ namespace cmd_interpreter
     //    Set a value in the register      0x02 -- location,      value
     //    GOTO                             0x03 -- line number
     //    LOOP_DONE                        0x0A -- no args, when a program loop is done, this insturction must be called to allow the main cpu tasks continue
+    //    HALT                             0xFE -- no args, Stopts the running program
     //    Incriment register               0x04 -- register
     //    Decrement register               0x05 -- register
     //----------------------(INT MATH ONLY)----------------------------
@@ -566,6 +574,12 @@ namespace cmd_interpreter
       program_IO_data_register[program_space[program_IO_data_register[0]][3]] = get_data_a() / get_data_b();
       break;
 
+    case cmds::HALT:
+      status::running = false;  // halt the program from running
+      status::loop_done = true; // Allow the program to exit right away
+      return;                   // We are done running, lets go do something else fun *takes ball* *goes home*
+      break;
+
     case cmds::DUMP: // DUMP PROG_IO_REG
       if (status::visual_debug_mode)
       {
@@ -615,6 +629,8 @@ namespace cmd_interpreter
     {
       DEBUGGER_OUTPUT.println("LOAD DONE, STARTING PROGRAM");
 
+      cmd_interpreter::program_IO_data_register[0] = 0; // reset the program counter to zero
+
       cmd_interpreter::status::running = true; // Set to true to allow execution
     }
     else
@@ -623,9 +639,347 @@ namespace cmd_interpreter
     }
   }
 
+  void debugger_draw_fraim()
+  {
+    // dump the program to serial display, with PC having a pointer to the current instruction
+    DEBUG_SCREEN.write(0xC); // clear the screen some
+    DEBUG_SCREEN.println("--PROG INSTRUCTIONS---|P|-----PROG BRAKE DOWN-------");
+    DEBUG_SCREEN.println("----------------------|C|INST|----------------------");
+    for (size_t i = 0; i < cmd_interpreter::max_program_length; i++)
+    { // BUILD THE DISPLAY LINE BY LINE
+      // LINE NUMBER | INST NAME | DATA,DATA,DATA | PC | Command annotation
+
+      if (i <= 9) // make up for the missing 0
+      {
+        DEBUG_SCREEN.print("0");
+      }
+      DEBUG_SCREEN.print(i); // print the line number
+
+      DEBUG_SCREEN.print("|");
+      debug::print_command_name(i);
+
+      DEBUG_SCREEN.print(" "); // Space between cmd name and data
+
+      for (size_t x = 1; x < cmd_interpreter::max_instruction_args; x++)
+      { // prnt the data
+
+        debug::print_pretty_hex(program_space[i][x]);
+        DEBUG_SCREEN.print(",");
+      }
+
+      if (i == program_IO_data_register[0]) // Draw program counter pointer
+      {
+        DEBUG_SCREEN.print("<");
+      }
+      else
+      {
+        DEBUG_SCREEN.print(" "); // conver to move the pointer
+      }
+
+      DEBUG_SCREEN.print("|"); // Bar to seprate the automatic anotation
+
+      // on the line time to anotate the program
+
+      debug::print_command_name(i); // cmd
+      DEBUG_SCREEN.print(" ");      // space
+
+      if (cmd_interpreter::program_space[i][0] == cmds::IF)
+      {                                                  // if cmd
+        if (cmd_interpreter::program_space[i][1] > 0xF0) // arg 1
+        {
+          // ifcmd loading from a register
+          DEBUG_SCREEN.print("[");
+          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1] - 0xF0); // register number
+          DEBUG_SCREEN.print("] ");
+        }
+        else
+        { // user is using a const value
+          DEBUG_SCREEN.print(" ");
+          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]); // ABS value
+          DEBUG_SCREEN.print("  ");
+        }
+
+        // opperand
+        switch (cmd_interpreter::program_space[i][3])
+        {
+        case 0x10:
+          DEBUG_SCREEN.print("= ");
+          break;
+
+        case 0x20:
+          DEBUG_SCREEN.print("!=");
+          break;
+
+        case 0x30:
+          DEBUG_SCREEN.print("> ");
+          break;
+
+        case 0x31:
+          DEBUG_SCREEN.print(">=");
+          break;
+
+        case 0x40:
+          DEBUG_SCREEN.print("< ");
+          break;
+
+        case 0x41:
+          DEBUG_SCREEN.print("<=");
+          break;
+
+        default:
+          DEBUG_SCREEN.print("IN");
+          break;
+        }
+
+        if (cmd_interpreter::program_space[i][2] > 0xF0) // arg 2
+        {
+          // ifcmd loading from a register
+          DEBUG_SCREEN.print("[");
+          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2] - 0xF0); // register number
+          DEBUG_SCREEN.print("] ");
+        }
+        else
+        { // user is using a const value
+          DEBUG_SCREEN.print(" ");
+          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2]); // ABS value
+          DEBUG_SCREEN.print("  ");
+        }
+      }
+      else if (cmd_interpreter::program_space[i][0] == cmds::GOTO)
+      { // if cmd is goto, only print the raw number
+        DEBUG_SCREEN.print("->");
+        DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]);
+        if (cmd_interpreter::program_space[i][1] <= 9)
+        { // Add a space for the missing digit
+          DEBUG_SCREEN.print(" ");
+        }
+      }
+      else if (cmd_interpreter::program_space[i][0] == cmds::INCR || cmd_interpreter::program_space[i][0] == cmds::DECR)
+      {
+        DEBUG_SCREEN.print("[");
+        DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]);
+        DEBUG_SCREEN.print("]");
+      }
+      else if (cmd_interpreter::program_space[i][0] == cmds::ADD ||
+               cmd_interpreter::program_space[i][0] == cmds::SUB ||
+               cmd_interpreter::program_space[i][0] == cmds::MUT ||
+               cmd_interpreter::program_space[i][0] == cmds::DIV)
+      {
+        if (cmd_interpreter::program_space[i][1] > 0xF0) // arg 1
+        {
+          // ifcmd loading from a register
+          DEBUG_SCREEN.print("[");
+          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1] - 0xF0); // register number
+          DEBUG_SCREEN.print("] ");
+        }
+        else
+        { // user is using a const value
+          DEBUG_SCREEN.print(" ");
+          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]); // ABS value
+          DEBUG_SCREEN.print("  ");
+        }
+
+        switch (cmd_interpreter::program_space[i][0])
+        {
+        case cmds::ADD:
+          DEBUG_SCREEN.print("+");
+          break;
+        case cmds::SUB:
+          DEBUG_SCREEN.print("-");
+          break;
+        case cmds::MUT:
+          DEBUG_SCREEN.print("*");
+          break;
+        case cmds::DIV:
+          DEBUG_SCREEN.print("/");
+          break;
+
+        default:
+          DEBUG_SCREEN.print("?");
+          break;
+        }
+
+        // Opperation
+
+        if (cmd_interpreter::program_space[i][2] > 0xF0) // arg 1
+        {
+          // ifcmd loading from a register
+          DEBUG_SCREEN.print("[");
+          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2] - 0xF0); // register number
+          DEBUG_SCREEN.print("] ");
+        }
+        else
+        { // user is using a const value
+          DEBUG_SCREEN.print(" ");
+          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2]); // ABS value
+          DEBUG_SCREEN.print(" ");
+        }
+
+        // dest
+        DEBUG_SCREEN.print("->");
+
+        DEBUG_SCREEN.print("[");
+        DEBUG_SCREEN.print(cmd_interpreter::program_space[i][3]); // ABS value
+        DEBUG_SCREEN.print("]");
+      }
+      else if (cmd_interpreter::program_space[i][0] == cmds::SRG)
+      {
+        DEBUG_SCREEN.print("[");
+        DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]);
+        DEBUG_SCREEN.print("]");
+        DEBUG_SCREEN.print("<-");
+        DEBUG_SCREEN.print(" ");
+        DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2]);
+        DEBUG_SCREEN.print(" ");
+      }
+
+      DEBUG_SCREEN.println(""); // NEW LINE
+    }
+
+    // Print the Current prog io register
+    DEBUG_SCREEN.println("-------------------IO REGISTERS---------------------");
+    for (size_t i = 0; i < prog_data_register_size; i++)
+    { // For every element in the data register
+      DEBUG_SCREEN.print(" [");
+      if (i <= 9)
+      {
+        DEBUG_SCREEN.print("0");
+      }
+      if (i <= 99)
+      {
+        DEBUG_SCREEN.print("0");
+      }
+
+      DEBUG_SCREEN.print(i);
+      DEBUG_SCREEN.print("]=");
+
+      if (program_IO_data_register[i] <= 9)
+      {
+        DEBUG_SCREEN.print("0");
+      }
+      if (program_IO_data_register[i] <= 99)
+      {
+        DEBUG_SCREEN.print("0");
+      }
+      DEBUG_SCREEN.print(program_IO_data_register[i]); // Print value
+      if (i == 4 || i == 9)
+      {
+        DEBUG_SCREEN.println("");
+      }
+    }
+    DEBUG_SCREEN.println(""); // New line after program counter
+    DEBUG_SCREEN.println("----------------------IO STATUS---------------------");
+
+    DEBUG_SCREEN.print("INPUTS: ");
+    if (status::visual_debug_enable_inputs)
+    {
+      DEBUG_SCREEN.print(" ENABLED");
+    }
+    else
+    {
+      DEBUG_SCREEN.print("DISABLED");
+    }
+
+    DEBUG_SCREEN.print("                  ");
+
+    DEBUG_SCREEN.print("OUTPUTS: ");
+    if (status::visual_debug_enable_outputs)
+    {
+      DEBUG_SCREEN.print(" ENABLED");
+    }
+    else
+    {
+      DEBUG_SCREEN.print("DISABLED");
+    }
+    DEBUG_SCREEN.println("");
+    DEBUG_SCREEN.println("-------------------IO DEVICE MAP--------------------");
+
+    DEBUG_SCREEN.print("ADDON: ");
+
+    for (size_t i = 0; i < prog_data_register_size; i++)
+    {
+      if (setup::register_usage[i].pin_used_for_io)
+      { // show addon address
+        debug::print_pretty_hex(setup::register_usage[i].addon_address);
+        DEBUG_SCREEN.print("[");
+        DEBUG_SCREEN.print(setup::register_usage[i].addon_register);
+        if (setup::register_usage[i].addon_register <= 9)
+        {
+          DEBUG_SCREEN.print(" ");
+        }
+        DEBUG_SCREEN.print("]  ");
+      }
+    }
+    DEBUG_SCREEN.println("");
+    // Where the pointers will live
+    DEBUG_SCREEN.print("         ");
+
+    for (size_t i = 0; i < prog_data_register_size; i++)
+    {
+      if (setup::register_usage[i].pin_used_for_io)
+      { // Arrow to indicate data flow
+        if (setup::register_usage[i].dir == setup::REG_INPUT)
+        {
+          DEBUG_SCREEN.print("v");
+        }
+        else
+        {
+          DEBUG_SCREEN.print("^");
+        }
+        DEBUG_SCREEN.print("         ");
+      }
+    }
+
+    DEBUG_SCREEN.println("");
+
+    DEBUG_SCREEN.print("LOCAL: ");
+
+    for (size_t i = 0; i < prog_data_register_size; i++)
+    {
+      if (setup::register_usage[i].pin_used_for_io)
+      { // Show loacal register
+        DEBUG_SCREEN.print(" [");
+        DEBUG_SCREEN.print(i);
+        if (i <= 9)
+        {
+          DEBUG_SCREEN.print(" ");
+        }
+        DEBUG_SCREEN.print("]     ");
+      }
+    }
+
+    DEBUG_SCREEN.println("");
+    DEBUG_SCREEN.println("-------------------STATUS REGISTERS-----------------");
+
+    DEBUG_SCREEN.print("|  ");
+    DEBUG_SCREEN.print("RUNNING: ");
+    if (status::running)
+    {
+      DEBUG_SCREEN.print("T ");
+    }
+    else
+    {
+      DEBUG_SCREEN.print("F ");
+    }
+
+    DEBUG_SCREEN.println("   |");
+    DEBUG_SCREEN.println("----------------------------------------------------");
+
+    if (status::visual_debug_enable_inputs)
+    {
+      update_input_devices(); // Read input devices
+    }
+
+    // cmd_interpreter(); // take a step
+
+    if (status::visual_debug_enable_outputs)
+    {
+      update_output_devices();
+    }
+  }
+
   void run() // Execute the script (call as often as you like)
   {
-
     if (!status::visual_debug_mode)
     {
       if ((millis() > status::last_cmd_run + cmd_run_delay) && cmd_interpreter::status::running)
@@ -651,327 +1005,8 @@ namespace cmd_interpreter
       }
     }
     else
-    { // Welcome to the deugging mode!
-
-      // dump the program to serial display, with PC having a pointer to the current instruction
-      DEBUG_SCREEN.write(0xC); // clear the screen some
-      DEBUG_SCREEN.println("--PROG INSTRUCTIONS---|P|-----PROG BRAKE DOWN-------");
-      DEBUG_SCREEN.println("----------------------|C|INST|----------------------");
-      for (size_t i = 0; i < cmd_interpreter::max_program_length; i++)
-      { // BUILD THE DISPLAY LINE BY LINE
-        // LINE NUMBER | INST NAME | DATA,DATA,DATA | PC | Command annotation
-
-        if (i <= 9) // make up for the missing 0
-        {
-          DEBUG_SCREEN.print("0");
-        }
-        DEBUG_SCREEN.print(i); // print the line number
-
-        DEBUG_SCREEN.print("|");
-        debug::print_command_name(i);
-
-        DEBUG_SCREEN.print(" "); // Space between cmd name and data
-
-        for (size_t x = 1; x < cmd_interpreter::max_instruction_args; x++)
-        { // prnt the data
-
-          debug::print_pretty_hex(program_space[i][x]);
-          DEBUG_SCREEN.print(",");
-        }
-
-        if (i == program_IO_data_register[0]) // Draw program counter pointer
-        {
-          DEBUG_SCREEN.print("<");
-        }
-        else
-        {
-          DEBUG_SCREEN.print(" "); // conver to move the pointer
-        }
-
-        DEBUG_SCREEN.print("|"); // Bar to seprate the automatic anotation
-
-        // on the line time to anotate the program
-
-        debug::print_command_name(i); // cmd
-        DEBUG_SCREEN.print(" ");      // space
-
-        if (cmd_interpreter::program_space[i][0] == cmds::IF)
-        {                                                  // if cmd
-          if (cmd_interpreter::program_space[i][1] > 0xF0) // arg 1
-          {
-            // ifcmd loading from a register
-            DEBUG_SCREEN.print("[");
-            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1] - 0xF0); // register number
-            DEBUG_SCREEN.print("] ");
-          }
-          else
-          { // user is using a const value
-            DEBUG_SCREEN.print(" ");
-            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]); // ABS value
-            DEBUG_SCREEN.print("  ");
-          }
-
-          // opperand
-          switch (cmd_interpreter::program_space[i][3])
-          {
-          case 0x10:
-            DEBUG_SCREEN.print("= ");
-            break;
-
-          case 0x20:
-            DEBUG_SCREEN.print("!=");
-            break;
-
-          case 0x30:
-            DEBUG_SCREEN.print("> ");
-            break;
-
-          case 0x31:
-            DEBUG_SCREEN.print(">=");
-            break;
-
-          case 0x40:
-            DEBUG_SCREEN.print("< ");
-            break;
-
-          case 0x41:
-            DEBUG_SCREEN.print("<=");
-            break;
-
-          default:
-            DEBUG_SCREEN.print("IN");
-            break;
-          }
-
-          if (cmd_interpreter::program_space[i][2] > 0xF0) // arg 2
-          {
-            // ifcmd loading from a register
-            DEBUG_SCREEN.print("[");
-            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2] - 0xF0); // register number
-            DEBUG_SCREEN.print("] ");
-          }
-          else
-          { // user is using a const value
-            DEBUG_SCREEN.print(" ");
-            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2]); // ABS value
-            DEBUG_SCREEN.print("  ");
-          }
-        }
-        else if (cmd_interpreter::program_space[i][0] == cmds::GOTO)
-        { // if cmd is goto, only print the raw number
-          DEBUG_SCREEN.print("->");
-          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]);
-          if (cmd_interpreter::program_space[i][1] <= 9)
-          { // Add a space for the missing digit
-            DEBUG_SCREEN.print(" ");
-          }
-        }
-        else if (cmd_interpreter::program_space[i][0] == cmds::INCR || cmd_interpreter::program_space[i][0] == cmds::DECR)
-        {
-          DEBUG_SCREEN.print("[");
-          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]);
-          DEBUG_SCREEN.print("]");
-        }
-        else if (cmd_interpreter::program_space[i][0] == cmds::ADD ||
-                 cmd_interpreter::program_space[i][0] == cmds::SUB ||
-                 cmd_interpreter::program_space[i][0] == cmds::MUT ||
-                 cmd_interpreter::program_space[i][0] == cmds::DIV)
-        {
-          if (cmd_interpreter::program_space[i][1] > 0xF0) // arg 1
-          {
-            // ifcmd loading from a register
-            DEBUG_SCREEN.print("[");
-            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1] - 0xF0); // register number
-            DEBUG_SCREEN.print("] ");
-          }
-          else
-          { // user is using a const value
-            DEBUG_SCREEN.print(" ");
-            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]); // ABS value
-            DEBUG_SCREEN.print("  ");
-          }
-
-          switch (cmd_interpreter::program_space[i][0])
-          {
-          case cmds::ADD:
-            DEBUG_SCREEN.print("+");
-            break;
-          case cmds::SUB:
-            DEBUG_SCREEN.print("-");
-            break;
-          case cmds::MUT:
-            DEBUG_SCREEN.print("*");
-            break;
-          case cmds::DIV:
-            DEBUG_SCREEN.print("/");
-            break;
-
-          default:
-            DEBUG_SCREEN.print("?");
-            break;
-          }
-
-          // Opperation
-
-          if (cmd_interpreter::program_space[i][2] > 0xF0) // arg 1
-          {
-            // ifcmd loading from a register
-            DEBUG_SCREEN.print("[");
-            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2] - 0xF0); // register number
-            DEBUG_SCREEN.print("] ");
-          }
-          else
-          { // user is using a const value
-            DEBUG_SCREEN.print(" ");
-            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2]); // ABS value
-            DEBUG_SCREEN.print(" ");
-          }
-
-          // dest
-          DEBUG_SCREEN.print("->");
-
-          DEBUG_SCREEN.print("[");
-          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][3]); // ABS value
-          DEBUG_SCREEN.print("]");
-        }
-        else if (cmd_interpreter::program_space[i][0] == cmds::SRG)
-        {
-          DEBUG_SCREEN.print("[");
-          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]);
-          DEBUG_SCREEN.print("]");
-          DEBUG_SCREEN.print("<-");
-          DEBUG_SCREEN.print(" ");
-          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2]);
-          DEBUG_SCREEN.print(" ");
-        }
-
-        DEBUG_SCREEN.println(""); // NEW LINE
-      }
-
-      // Print the Current prog io register
-      DEBUG_SCREEN.println("-------------------IO REGISTERS---------------------");
-      for (size_t i = 0; i < prog_data_register_size; i++)
-      { // For every element in the data register
-        DEBUG_SCREEN.print(" [");
-        if (i <= 9)
-        {
-          DEBUG_SCREEN.print("0");
-        }
-        if (i <= 99)
-        {
-          DEBUG_SCREEN.print("0");
-        }
-
-        DEBUG_SCREEN.print(i);
-        DEBUG_SCREEN.print("]=");
-
-        if (program_IO_data_register[i] <= 9)
-        {
-          DEBUG_SCREEN.print("0");
-        }
-        if (program_IO_data_register[i] <= 99)
-        {
-          DEBUG_SCREEN.print("0");
-        }
-        DEBUG_SCREEN.print(program_IO_data_register[i]); // Print value
-        if (i == 4 || i == 9)
-        {
-          DEBUG_SCREEN.println("");
-        }
-      }
-      DEBUG_SCREEN.println(""); // New line after program counter
-      DEBUG_SCREEN.println("----------------------IO STATUS---------------------");
-
-      DEBUG_SCREEN.print("INPUTS: ");
-      if (status::visual_debug_enable_inputs)
-      {
-        DEBUG_SCREEN.print(" ENABLED");
-      }
-      else
-      {
-        DEBUG_SCREEN.print("DISABLED");
-      }
-
-      DEBUG_SCREEN.print("                  ");
-
-      DEBUG_SCREEN.print("OUTPUTS: ");
-      if (status::visual_debug_enable_outputs)
-      {
-        DEBUG_SCREEN.print(" ENABLED");
-      }
-      else
-      {
-        DEBUG_SCREEN.print("DISABLED");
-      }
-      DEBUG_SCREEN.println("");
-      DEBUG_SCREEN.println("-------------------IO DEVICE MAP--------------------");
-
-      DEBUG_SCREEN.print("ADDON: ");
-
-      for (size_t i = 0; i < prog_data_register_size; i++)
-      {
-        if (setup::register_usage[i].pin_used_for_io)
-        { // show addon address
-          debug::print_pretty_hex(setup::register_usage[i].addon_address);
-          DEBUG_SCREEN.print("[");
-          DEBUG_SCREEN.print(setup::register_usage[i].addon_register);
-          if (setup::register_usage[i].addon_register <= 9)
-          {
-            DEBUG_SCREEN.print(" ");
-          }
-          DEBUG_SCREEN.print("]  ");
-        }
-      }
-      DEBUG_SCREEN.println("");
-      // Where the pointers will live
-      DEBUG_SCREEN.print("         ");
-
-      for (size_t i = 0; i < prog_data_register_size; i++)
-      {
-        if (setup::register_usage[i].pin_used_for_io)
-        { // Arrow to indicate data flow
-          if (setup::register_usage[i].dir == setup::REG_INPUT)
-          {
-            DEBUG_SCREEN.print("v");
-          }
-          else
-          {
-            DEBUG_SCREEN.print("^");
-          }
-          DEBUG_SCREEN.print("         ");
-        }
-      }
-
-      DEBUG_SCREEN.println("");
-
-      DEBUG_SCREEN.print("LOCAL: ");
-
-      for (size_t i = 0; i < prog_data_register_size; i++)
-      {
-        if (setup::register_usage[i].pin_used_for_io)
-        { // Show loacal register
-          DEBUG_SCREEN.print(" [");
-          DEBUG_SCREEN.print(i);
-          if (i <= 9)
-          {
-            DEBUG_SCREEN.print(" ");
-          }
-          DEBUG_SCREEN.print("]     ");
-        }
-      }
-
-      if (status::visual_debug_enable_inputs)
-      {
-        update_input_devices(); // Read input devices
-      }
-
-      cmd_interpreter(); // take a step
-
-      if (status::visual_debug_enable_outputs)
-      {
-        update_output_devices();
-      }
-      delay(1000); // debugging delay
+    {
+      error_handler(0xFE, "IN DEBUGGING MODE", 0);
     }
   }
 } // Namespace
@@ -987,23 +1022,8 @@ void setup_program_0()
 
   test_program_0_setup[2].pin_used_for_io = true;
   test_program_0_setup[2].addon_address = 0x02;
-  test_program_0_setup[2].addon_register = 3;
+  test_program_0_setup[2].addon_register = 99;
   test_program_0_setup[2].dir = cmd_interpreter::setup::REG_INPUT;
-
-  test_program_0_setup[3].pin_used_for_io = true;
-  test_program_0_setup[3].addon_address = 0x02;
-  test_program_0_setup[3].addon_register = 3;
-  test_program_0_setup[3].dir = cmd_interpreter::setup::REG_INPUT;
-
-  test_program_0_setup[4].pin_used_for_io = true;
-  test_program_0_setup[4].addon_address = 0x02;
-  test_program_0_setup[4].addon_register = 3;
-  test_program_0_setup[4].dir = cmd_interpreter::setup::REG_INPUT;
-
-  test_program_0_setup[10].pin_used_for_io = true;
-  test_program_0_setup[10].addon_address = 0x02;
-  test_program_0_setup[10].addon_register = 2;
-  test_program_0_setup[10].dir = cmd_interpreter::setup::REG_OUTPUT;
 }
 
 volatile unsigned char test_program_0[cmd_interpreter::max_program_length][cmd_interpreter::max_instruction_args] = {
@@ -1012,13 +1032,22 @@ volatile unsigned char test_program_0[cmd_interpreter::max_program_length][cmd_i
     0x09, 0xF2, 0x2, 0x02,  // 1 |reg 2 / 2 -> reg2
     0x0A, 0, 0, 0,          // 2 |DUMP
     0x01, 0xF2, 2, 0x40,    // 3 |IF reg2 < 2
-    0x03, 0, 0, 0,          // 4 | goto 0 //reset the vals to keep deviding
+    0xFE, 0, 0, 0,          // 4 | goto 0 //reset the vals to keep deviding
     0x03, 1, 0, 0,          // 5 |goto 1  //skip setting the value
     0xFF, 0, 0, 0,          // 6 |-------------Debugging tests below
     0x01, 0x02, 0xF2, 0x10, // if
     0x04, 0x02, 0, 0,       // incr
     0x05, 0x02, 0, 0,       //
     0x0A, 0, 0, 0           //
+};
+
+volatile unsigned char test_program_1[cmd_interpreter::max_program_length][cmd_interpreter::max_instruction_args] = {
+    // CMD,ARG,  ARG,  ARG
+    0x04, 0x03, 0x00, 0x00, // 00 | [3]++
+    0x03, 0x00, 0x00, 0x00, // 01 | GOTO 0
+    0x00, 0x00, 0x00, 0x00, // 02 |
+    0x00, 0x00, 0x00, 0x00, // 03 |
+    0x00, 0x00, 0x00, 0x00, // 04 |
 };
 
 void setup()
@@ -1031,8 +1060,21 @@ void setup()
   cmd_interpreter::load_program(test_program_0, test_program_0_setup); // Load program
 }
 
+bool one_shot = false;
+
 void loop()
 {
+  cmd_interpreter::run();                 // Call to run the interpter normaly with debug mode disabled
+  cmd_interpreter::debugger_draw_fraim(); // Call to draw a fraim to the display
+  cmd_interpreter::cmd_interpreter();     // Call to take a debugging step
+  delay(500);
 
-  cmd_interpreter::run();
+  if (millis() > 15000 && !one_shot)
+  {
+    one_shot = true;
+    Serial.println("!!!LOADING NEW PROGRAM!!!!");
+    delay(5000);
+    cmd_interpreter::load_program(test_program_1, test_program_0_setup); // Load program
+    delay(5000);
+  }
 }
