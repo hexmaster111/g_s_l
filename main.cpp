@@ -58,6 +58,65 @@ namespace cmd_interpreter
       }
       Serial.print(num, HEX);
     }
+
+    void print_command_name(int cmd)
+    {
+      switch (program_space[cmd][0]) // print the name
+      {
+      case cmds::NOP:
+        Serial.print(cmds::NOP_pretty);
+        break;
+
+      case cmds::IF:
+        Serial.print(cmds::IF_pretty);
+        break;
+
+      case cmds::SRG:
+        Serial.print(cmds::SRG_pretty);
+        break;
+
+      case cmds::GOTO:
+        Serial.print(cmds::GOTO_pretty);
+        break;
+
+      case cmds::INCR:
+        Serial.print(cmds::INCR_pretty);
+        break;
+
+      case cmds::DECR:
+        Serial.print(cmds::DECR_pretty);
+        break;
+
+      case cmds::ADD:
+        Serial.print(cmds::ADD_pretty);
+        break;
+
+      case cmds::SUB:
+        Serial.print(cmds::SUB_pretty);
+        break;
+
+      case cmds::MUT:
+        Serial.print(cmds::MUT_pretty);
+        break;
+
+      case cmds::DIV:
+        Serial.print(cmds::DIV_pretty);
+        break;
+
+      case cmds::LOPDN:
+        Serial.print(cmds::LOPDN_pretty);
+        break;
+
+      case cmds::DUMP:
+        Serial.print(cmds::DUMP_pretty);
+        break;
+
+      default:
+        Serial.print("----");
+        break;
+      }
+    }
+
   }
 
   namespace setup // Where the IO setup inforation lives
@@ -593,64 +652,12 @@ namespace cmd_interpreter
 
       // dump the program to serial display, with PC having a pointer to the current instruction
       Serial.write(0xC); // clear the screen some
+      Serial.println("------DEBUGGER-------");
       Serial.println("---------------------");
       for (size_t i = 0; i < cmd_interpreter::max_program_length; i++)
       { // for every instruction
         // Print the name
-        switch (program_space[i][0]) // print the name
-        {
-        case cmds::NOP:
-          Serial.print(cmds::NOP_pretty);
-          break;
-
-        case cmds::IF:
-          Serial.print(cmds::IF_pretty);
-          break;
-
-        case cmds::SRG:
-          Serial.print(cmds::SRG_pretty);
-          break;
-
-        case cmds::GOTO:
-          Serial.print(cmds::GOTO_pretty);
-          break;
-
-        case cmds::INCR:
-          Serial.print(cmds::INCR_pretty);
-          break;
-
-        case cmds::DECR:
-          Serial.print(cmds::DECR_pretty);
-          break;
-
-        case cmds::ADD:
-          Serial.print(cmds::ADD_pretty);
-          break;
-
-        case cmds::SUB:
-          Serial.print(cmds::SUB_pretty);
-          break;
-
-        case cmds::MUT:
-          Serial.print(cmds::MUT_pretty);
-          break;
-
-        case cmds::DIV:
-          Serial.print(cmds::DIV_pretty);
-          break;
-
-        case cmds::LOPDN:
-          Serial.print(cmds::LOPDN_pretty);
-          break;
-
-        case cmds::DUMP:
-          Serial.print(cmds::DUMP_pretty);
-          break;
-
-        default:
-          Serial.print("----");
-          break;
-        }
+        debug::print_command_name(i);
 
         Serial.print(" "); // Space between cmd name and data
 
@@ -663,14 +670,35 @@ namespace cmd_interpreter
 
         if (i == program_IO_data_register[0]) // Draw program counter pointer
         {
-          Serial.print(" <---");
+          Serial.print("<");
+        }
+        else
+        {
+          Serial.print(" "); // conver to move the pointer
+        }
+
+        Serial.print("|"); // Bar to seprate the automatic anotation
+
+        // on the line time to anotate the program
+
+        debug::print_command_name(i); // cmd
+        Serial.print(" ");            // space
+
+        for (size_t x = 0; x < max_instruction_args; x++)
+        { // print the cmd disection
+          if (cmd_interpreter::program_space[i][x] > 0xF0)
+          { // if loading from a register
+            Serial.print("REG [");
+            Serial.print(cmd_interpreter::program_space[i][x] - 0xF0); // register number
+            Serial.print("]");
+          }
         }
 
         Serial.println(""); // NEW LINE
       }
 
       // Print the Current prog io register
-      Serial.println("------------");
+      Serial.println("---------------------");
       Serial.println("IO REGISTERS");
       for (size_t i = 0; i < prog_data_register_size; i++)
       { // For every element in the data register
