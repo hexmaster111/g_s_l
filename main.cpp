@@ -1,7 +1,8 @@
 #include <Arduino.h>
 
 using namespace std;
-
+#define DEBUGGER_OUTPUT Serial1
+#define DEBUG_SCREEN Serial // What is used for the debugger
 namespace cmd_interpreter
 {
 
@@ -38,11 +39,11 @@ namespace cmd_interpreter
     const char valid_commands[] = {NOP, IF, SRG, GOTO, INCR, DECR, ADD, SUB, MUT, DIV, DUMP, LOPDN};
   }
 
-  const int max_program_length = 11;
-  const int max_instruction_args = 4;    // THIS INCLUDES THE INITAL COMMAND
-  const int prog_data_register_size = 4; // 16 should be a good amount
-  const int cmd_run_delay = 500;         // How offten the interpter should run
-  const int max_cpu_usage_time = 1;      // max time that the interupter can keep the CPU buzy
+  const int max_program_length = 16;
+  const int max_instruction_args = 4;     // THIS INCLUDES THE INITAL COMMAND
+  const int prog_data_register_size = 14; // 16 should be a good amount
+  const int cmd_run_delay = 500;          // How offten the interpter should run
+  const int max_cpu_usage_time = 1;       // max time that the interupter can keep the CPU buzy
 
   volatile unsigned char program_space[max_program_length][max_instruction_args]; // dataspace for the program to run
   volatile int program_IO_data_register[prog_data_register_size];                 // Store the programs running data
@@ -52,12 +53,12 @@ namespace cmd_interpreter
 
     void print_pretty_hex(int num)
     {
-      Serial.print("0x");
+      DEBUG_SCREEN.print("0x");
       if (num < 16)
       {
-        Serial.print("0");
+        DEBUG_SCREEN.print("0");
       }
-      Serial.print(num, HEX);
+      DEBUG_SCREEN.print(num, HEX);
     }
 
     void print_command_name(int cmd)
@@ -65,55 +66,55 @@ namespace cmd_interpreter
       switch (program_space[cmd][0]) // print the name
       {
       case cmds::NOP:
-        Serial.print(cmds::NOP_pretty);
+        DEBUG_SCREEN.print(cmds::NOP_pretty);
         break;
 
       case cmds::IF:
-        Serial.print(cmds::IF_pretty);
+        DEBUG_SCREEN.print(cmds::IF_pretty);
         break;
 
       case cmds::SRG:
-        Serial.print(cmds::SRG_pretty);
+        DEBUG_SCREEN.print(cmds::SRG_pretty);
         break;
 
       case cmds::GOTO:
-        Serial.print(cmds::GOTO_pretty);
+        DEBUG_SCREEN.print(cmds::GOTO_pretty);
         break;
 
       case cmds::INCR:
-        Serial.print(cmds::INCR_pretty);
+        DEBUG_SCREEN.print(cmds::INCR_pretty);
         break;
 
       case cmds::DECR:
-        Serial.print(cmds::DECR_pretty);
+        DEBUG_SCREEN.print(cmds::DECR_pretty);
         break;
 
       case cmds::ADD:
-        Serial.print(cmds::ADD_pretty);
+        DEBUG_SCREEN.print(cmds::ADD_pretty);
         break;
 
       case cmds::SUB:
-        Serial.print(cmds::SUB_pretty);
+        DEBUG_SCREEN.print(cmds::SUB_pretty);
         break;
 
       case cmds::MUT:
-        Serial.print(cmds::MUT_pretty);
+        DEBUG_SCREEN.print(cmds::MUT_pretty);
         break;
 
       case cmds::DIV:
-        Serial.print(cmds::DIV_pretty);
+        DEBUG_SCREEN.print(cmds::DIV_pretty);
         break;
 
       case cmds::LOPDN:
-        Serial.print(cmds::LOPDN_pretty);
+        DEBUG_SCREEN.print(cmds::LOPDN_pretty);
         break;
 
       case cmds::DUMP:
-        Serial.print(cmds::DUMP_pretty);
+        DEBUG_SCREEN.print(cmds::DUMP_pretty);
         break;
 
       default:
-        Serial.print("----");
+        DEBUG_SCREEN.print("----");
         break;
       }
     }
@@ -137,6 +138,7 @@ namespace cmd_interpreter
     };
 
     program_setup register_usage[prog_data_register_size]; // The setup that the io function will read
+    // NOTE the index for this array is what register its for
 
     bool load_setup(program_setup setup[prog_data_register_size])
     {
@@ -148,9 +150,9 @@ namespace cmd_interpreter
 
         if (setup[i].pin_used_for_io && (setup[i].addon_address == 0))
         { // pin enabled for IO but no address deffined
-          Serial.print("SETUP ERROR - register: [");
-          Serial.print(i);
-          Serial.println("] enabled for I/O but no address was deffined.");
+          DEBUGGER_OUTPUT.print("SETUP ERROR - register: [");
+          DEBUGGER_OUTPUT.print(i);
+          DEBUGGER_OUTPUT.println("] enabled for I/O but no address was deffined.");
           _error = true;
         }
       }
@@ -200,12 +202,12 @@ namespace cmd_interpreter
         { // OUTPUT DEVICE
           //  update the output (if it needs it...)
           //@TODO intigrate this into the remote IO devices
-          Serial.print("[");
-          Serial.print(i);
-          Serial.print("] ");
-          Serial.print(program_IO_data_register[i]);
-          Serial.print("R  ->  D");
-          Serial.println(setup::register_usage[i].addon_address);
+          DEBUGGER_OUTPUT.print("[");
+          DEBUGGER_OUTPUT.print(i);
+          DEBUGGER_OUTPUT.print("] ");
+          DEBUGGER_OUTPUT.print(program_IO_data_register[i]);
+          DEBUGGER_OUTPUT.print("R  ->  D");
+          DEBUGGER_OUTPUT.println(setup::register_usage[i].addon_address);
         }
       }
     }
@@ -222,12 +224,12 @@ namespace cmd_interpreter
         { // INPUT DEVICE
           // Read the remote IO device
           // update the register to reflect the IO device
-          Serial.print("[");
-          Serial.print(i);
-          Serial.print("] ");
-          Serial.print(program_IO_data_register[i]);
-          Serial.print("R  <-  D");
-          Serial.println(setup::register_usage[i].addon_address);
+          DEBUGGER_OUTPUT.print("[");
+          DEBUGGER_OUTPUT.print(i);
+          DEBUGGER_OUTPUT.print("] ");
+          DEBUGGER_OUTPUT.print(program_IO_data_register[i]);
+          DEBUGGER_OUTPUT.print("R  <-  D");
+          DEBUGGER_OUTPUT.println(setup::register_usage[i].addon_address);
         }
       }
     }
@@ -250,8 +252,8 @@ namespace cmd_interpreter
       }
       if (!_found)
       {
-        Serial.print("Invalid command @ line: ");
-        Serial.println(i);
+        DEBUGGER_OUTPUT.print("Invalid command @ line: ");
+        DEBUGGER_OUTPUT.println(i);
         load_error = true;
       }
     }
@@ -314,12 +316,12 @@ namespace cmd_interpreter
     // Print out error messages ~prettly~
     if (err_level >= status::minimum_error_level_to_print)
     {
-      Serial.print("E_LV[ ");
-      Serial.print(err_level);
-      Serial.print("]ERR_MSG[ ");
-      Serial.print(log_msg);
-      Serial.print("] VAL: ");
-      Serial.print(log_val);
+      DEBUGGER_OUTPUT.print("E_LV[ ");
+      DEBUGGER_OUTPUT.print(err_level);
+      DEBUGGER_OUTPUT.print("]ERR_MSG[ ");
+      DEBUGGER_OUTPUT.print(log_msg);
+      DEBUGGER_OUTPUT.print("] VAL: ");
+      DEBUGGER_OUTPUT.print(log_val);
     }
   }
 
@@ -407,16 +409,16 @@ namespace cmd_interpreter
 
     if (status::dev_dump_before_every_command)
     {
-      Serial.print(" PC -> ");
-      Serial.println(program_IO_data_register[0]);
+      DEBUGGER_OUTPUT.print(" PC -> ");
+      DEBUGGER_OUTPUT.println(program_IO_data_register[0]);
 
       for (uint8_t i = 1; i < prog_data_register_size; i++)
       {
-        Serial.print("[");
-        Serial.print(i);
-        Serial.print("]");
-        Serial.print(" -> ");
-        Serial.println(program_IO_data_register[i]);
+        DEBUGGER_OUTPUT.print("[");
+        DEBUGGER_OUTPUT.print(i);
+        DEBUGGER_OUTPUT.print("]");
+        DEBUGGER_OUTPUT.print(" -> ");
+        DEBUGGER_OUTPUT.println(program_IO_data_register[i]);
       }
     }
 
@@ -430,12 +432,12 @@ namespace cmd_interpreter
 
     case cmds::IF: // IF
 
-      // Serial.print("A: ");
-      // Serial.println(get_data_a());
-      // Serial.print("B: ");
-      // Serial.println(get_data_b());
-      // Serial.print("OPP: ");
-      // Serial.println(program_space[program_IO_data_register[0]][3]);
+      // DEBUGGER_OUTPUT.print("A: ");
+      // DEBUGGER_OUTPUT.println(get_data_a());
+      // DEBUGGER_OUTPUT.print("B: ");
+      // DEBUGGER_OUTPUT.println(get_data_b());
+      // DEBUGGER_OUTPUT.print("OPP: ");
+      // DEBUGGER_OUTPUT.println(program_space[program_IO_data_register[0]][3]);
 
       switch (program_space[program_IO_data_register[0]][3]) // Opperand
       {
@@ -518,8 +520,8 @@ namespace cmd_interpreter
 
       default:
         status::running = false;
-        Serial.print("INVALID OPPERAND ON LINE: ");
-        Serial.println(program_IO_data_register[0]);
+        DEBUGGER_OUTPUT.print("INVALID OPPERAND ON LINE: ");
+        DEBUGGER_OUTPUT.println(program_IO_data_register[0]);
         break;
       }
 
@@ -531,8 +533,8 @@ namespace cmd_interpreter
 
     case cmds::GOTO: // GOTO LOCATION
       program_IO_data_register[0] = program_space[program_IO_data_register[0]][1];
-      // Serial.print("GOTO LINE # ");
-      // Serial.println(program_IO_data_register[0]);
+      // DEBUGGER_OUTPUT.print("GOTO LINE # ");
+      // DEBUGGER_OUTPUT.println(program_IO_data_register[0]);
       return; // WE DONT WANT TO INC THE PC
       break;
 
@@ -569,19 +571,19 @@ namespace cmd_interpreter
       {
         break;
       }
-      Serial.println("------------------------");
-      Serial.print(" PC -> ");
-      Serial.println(program_IO_data_register[0]);
+      DEBUGGER_OUTPUT.println("------------------------");
+      DEBUGGER_OUTPUT.print(" PC -> ");
+      DEBUGGER_OUTPUT.println(program_IO_data_register[0]);
 
       for (uint8_t i = 1; i < prog_data_register_size; i++)
       {
-        Serial.print("[");
-        Serial.print(i);
-        Serial.print("]");
-        Serial.print(" -> ");
-        Serial.println(program_IO_data_register[i]);
+        DEBUGGER_OUTPUT.print("[");
+        DEBUGGER_OUTPUT.print(i);
+        DEBUGGER_OUTPUT.print("]");
+        DEBUGGER_OUTPUT.print(" -> ");
+        DEBUGGER_OUTPUT.println(program_IO_data_register[i]);
       }
-      Serial.println("------------------------");
+      DEBUGGER_OUTPUT.println("------------------------");
       break;
 
     case cmds::LOPDN: // LOOP DONE
@@ -608,16 +610,16 @@ namespace cmd_interpreter
   {
 
     // Load program and setup info
-    Serial.println("LOADING PROGRAM...");
+    DEBUGGER_OUTPUT.println("LOADING PROGRAM...");
     if (!cmd_interpreter::load_program(_program) && !cmd_interpreter::setup::load_setup(_register_setup))
     {
-      Serial.println("LOAD DONE, STARTING PROGRAM");
+      DEBUGGER_OUTPUT.println("LOAD DONE, STARTING PROGRAM");
 
       cmd_interpreter::status::running = true; // Set to true to allow execution
     }
     else
     {
-      Serial.println("LOAD FAILED");
+      DEBUGGER_OUTPUT.println("LOAD FAILED");
     }
   }
 
@@ -641,7 +643,7 @@ namespace cmd_interpreter
           if (millis() > start_time + max_cpu_usage_time)
           { // If the program seems hung up, stop running and give the main program some CPU time
             status::loop_done = true;
-            Serial.println("BRAKE!! cpu time exceaded...\n make sure you are using the LOPDN command\n if you are sure the prog is running correctly, try upping max_cpu_usage_time");
+            error_handler(0x0F, "VM EXECUTION TIME EXCETED, MAKE SURE YOUR PROGRAM CALLES LOPDN OFFTEN ENOUGH", 0);
           }
         }
         update_output_devices();         // Write to the remote IO devices
@@ -652,123 +654,123 @@ namespace cmd_interpreter
     { // Welcome to the deugging mode!
 
       // dump the program to serial display, with PC having a pointer to the current instruction
-      Serial.write(0xC); // clear the screen some
-      Serial.println("--PROG INSTRUCTIONS---|P|-----PROG BRAKE DOWN-------");
-      Serial.println("----------------------|C|INST|----------------------");
+      DEBUG_SCREEN.write(0xC); // clear the screen some
+      DEBUG_SCREEN.println("--PROG INSTRUCTIONS---|P|-----PROG BRAKE DOWN-------");
+      DEBUG_SCREEN.println("----------------------|C|INST|----------------------");
       for (size_t i = 0; i < cmd_interpreter::max_program_length; i++)
-      { // for every instruction
-        // Print the name
+      { // BUILD THE DISPLAY LINE BY LINE
+        // LINE NUMBER | INST NAME | DATA,DATA,DATA | PC | Command annotation
 
         if (i <= 9) // make up for the missing 0
         {
-          Serial.print("0");
+          DEBUG_SCREEN.print("0");
         }
-        Serial.print(i); // print the line number
+        DEBUG_SCREEN.print(i); // print the line number
 
-        Serial.print("|");
+        DEBUG_SCREEN.print("|");
         debug::print_command_name(i);
 
-        Serial.print(" "); // Space between cmd name and data
+        DEBUG_SCREEN.print(" "); // Space between cmd name and data
 
         for (size_t x = 1; x < cmd_interpreter::max_instruction_args; x++)
         { // prnt the data
 
           debug::print_pretty_hex(program_space[i][x]);
-          Serial.print(",");
+          DEBUG_SCREEN.print(",");
         }
 
         if (i == program_IO_data_register[0]) // Draw program counter pointer
         {
-          Serial.print("<");
+          DEBUG_SCREEN.print("<");
         }
         else
         {
-          Serial.print(" "); // conver to move the pointer
+          DEBUG_SCREEN.print(" "); // conver to move the pointer
         }
 
-        Serial.print("|"); // Bar to seprate the automatic anotation
+        DEBUG_SCREEN.print("|"); // Bar to seprate the automatic anotation
 
         // on the line time to anotate the program
 
         debug::print_command_name(i); // cmd
-        Serial.print(" ");            // space
+        DEBUG_SCREEN.print(" ");      // space
 
         if (cmd_interpreter::program_space[i][0] == cmds::IF)
         {                                                  // if cmd
           if (cmd_interpreter::program_space[i][1] > 0xF0) // arg 1
           {
             // ifcmd loading from a register
-            Serial.print("[");
-            Serial.print(cmd_interpreter::program_space[i][1] - 0xF0); // register number
-            Serial.print("] ");
+            DEBUG_SCREEN.print("[");
+            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1] - 0xF0); // register number
+            DEBUG_SCREEN.print("] ");
           }
           else
           { // user is using a const value
-            Serial.print(" ");
-            Serial.print(cmd_interpreter::program_space[i][1]); // ABS value
-            Serial.print("  ");
+            DEBUG_SCREEN.print(" ");
+            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]); // ABS value
+            DEBUG_SCREEN.print("  ");
           }
 
           // opperand
           switch (cmd_interpreter::program_space[i][3])
           {
           case 0x10:
-            Serial.print("= ");
+            DEBUG_SCREEN.print("= ");
             break;
 
           case 0x20:
-            Serial.print("!=");
+            DEBUG_SCREEN.print("!=");
             break;
 
           case 0x30:
-            Serial.print("> ");
+            DEBUG_SCREEN.print("> ");
             break;
 
           case 0x31:
-            Serial.print(">=");
+            DEBUG_SCREEN.print(">=");
             break;
 
           case 0x40:
-            Serial.print("< ");
+            DEBUG_SCREEN.print("< ");
             break;
 
           case 0x41:
-            Serial.print("<=");
+            DEBUG_SCREEN.print("<=");
             break;
 
           default:
-            Serial.print("IN");
+            DEBUG_SCREEN.print("IN");
             break;
           }
 
           if (cmd_interpreter::program_space[i][2] > 0xF0) // arg 2
           {
             // ifcmd loading from a register
-            Serial.print("[");
-            Serial.print(cmd_interpreter::program_space[i][2] - 0xF0); // register number
-            Serial.print("] ");
+            DEBUG_SCREEN.print("[");
+            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2] - 0xF0); // register number
+            DEBUG_SCREEN.print("] ");
           }
           else
           { // user is using a const value
-            Serial.print(" ");
-            Serial.print(cmd_interpreter::program_space[i][2]); // ABS value
-            Serial.print("  ");
+            DEBUG_SCREEN.print(" ");
+            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2]); // ABS value
+            DEBUG_SCREEN.print("  ");
           }
         }
         else if (cmd_interpreter::program_space[i][0] == cmds::GOTO)
         { // if cmd is goto, only print the raw number
-          Serial.print("->");
-          Serial.print(cmd_interpreter::program_space[i][1]);
+          DEBUG_SCREEN.print("->");
+          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]);
           if (cmd_interpreter::program_space[i][1] <= 9)
           { // Add a space for the missing digit
-            Serial.print(" ");
+            DEBUG_SCREEN.print(" ");
           }
         }
         else if (cmd_interpreter::program_space[i][0] == cmds::INCR || cmd_interpreter::program_space[i][0] == cmds::DECR)
         {
-          Serial.print("[");
-          Serial.print(cmd_interpreter::program_space[i][1]);
-          Serial.print("]");
+          DEBUG_SCREEN.print("[");
+          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]);
+          DEBUG_SCREEN.print("]");
         }
         else if (cmd_interpreter::program_space[i][0] == cmds::ADD ||
                  cmd_interpreter::program_space[i][0] == cmds::SUB ||
@@ -778,34 +780,34 @@ namespace cmd_interpreter
           if (cmd_interpreter::program_space[i][1] > 0xF0) // arg 1
           {
             // ifcmd loading from a register
-            Serial.print("[");
-            Serial.print(cmd_interpreter::program_space[i][1] - 0xF0); // register number
-            Serial.print("] ");
+            DEBUG_SCREEN.print("[");
+            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1] - 0xF0); // register number
+            DEBUG_SCREEN.print("] ");
           }
           else
           { // user is using a const value
-            Serial.print(" ");
-            Serial.print(cmd_interpreter::program_space[i][1]); // ABS value
-            Serial.print("  ");
+            DEBUG_SCREEN.print(" ");
+            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]); // ABS value
+            DEBUG_SCREEN.print("  ");
           }
 
           switch (cmd_interpreter::program_space[i][0])
           {
           case cmds::ADD:
-            Serial.print("+");
+            DEBUG_SCREEN.print("+");
             break;
           case cmds::SUB:
-            Serial.print("-");
+            DEBUG_SCREEN.print("-");
             break;
           case cmds::MUT:
-            Serial.print("*");
+            DEBUG_SCREEN.print("*");
             break;
           case cmds::DIV:
-            Serial.print("/");
+            DEBUG_SCREEN.print("/");
             break;
 
           default:
-            Serial.print("?");
+            DEBUG_SCREEN.print("?");
             break;
           }
 
@@ -814,50 +816,150 @@ namespace cmd_interpreter
           if (cmd_interpreter::program_space[i][2] > 0xF0) // arg 1
           {
             // ifcmd loading from a register
-            Serial.print("[");
-            Serial.print(cmd_interpreter::program_space[i][2] - 0xF0); // register number
-            Serial.print("] ");
+            DEBUG_SCREEN.print("[");
+            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2] - 0xF0); // register number
+            DEBUG_SCREEN.print("] ");
           }
           else
           { // user is using a const value
-            Serial.print(" ");
-            Serial.print(cmd_interpreter::program_space[i][2]); // ABS value
-            Serial.print(" ");
+            DEBUG_SCREEN.print(" ");
+            DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2]); // ABS value
+            DEBUG_SCREEN.print(" ");
           }
 
           // dest
-          Serial.print("->");
+          DEBUG_SCREEN.print("->");
 
-          Serial.print("[");
-          Serial.print(cmd_interpreter::program_space[i][3]); // ABS value
-          Serial.print("]");
+          DEBUG_SCREEN.print("[");
+          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][3]); // ABS value
+          DEBUG_SCREEN.print("]");
         }
         else if (cmd_interpreter::program_space[i][0] == cmds::SRG)
         {
-          Serial.print("[");
-          Serial.print(cmd_interpreter::program_space[i][1]);
-          Serial.print("]");
-          Serial.print("<-");
-          Serial.print(" ");
-          Serial.print(cmd_interpreter::program_space[i][2]);
-          Serial.print(" ");
+          DEBUG_SCREEN.print("[");
+          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][1]);
+          DEBUG_SCREEN.print("]");
+          DEBUG_SCREEN.print("<-");
+          DEBUG_SCREEN.print(" ");
+          DEBUG_SCREEN.print(cmd_interpreter::program_space[i][2]);
+          DEBUG_SCREEN.print(" ");
         }
 
-        Serial.println(""); // NEW LINE
+        DEBUG_SCREEN.println(""); // NEW LINE
       }
 
       // Print the Current prog io register
-      Serial.println("----------------------------------------------------");
-      Serial.println("-------------------IO REGISTERS---------------------");
+      DEBUG_SCREEN.println("-------------------IO REGISTERS---------------------");
       for (size_t i = 0; i < prog_data_register_size; i++)
       { // For every element in the data register
-        Serial.print("  [");
-        Serial.print(i);
-        Serial.print("]=");
-        Serial.print(program_IO_data_register[i]); // Print value
+        DEBUG_SCREEN.print(" [");
+        if (i <= 9)
+        {
+          DEBUG_SCREEN.print("0");
+        }
+        if (i <= 99)
+        {
+          DEBUG_SCREEN.print("0");
+        }
+
+        DEBUG_SCREEN.print(i);
+        DEBUG_SCREEN.print("]=");
+
+        if (program_IO_data_register[i] <= 9)
+        {
+          DEBUG_SCREEN.print("0");
+        }
+        if (program_IO_data_register[i] <= 99)
+        {
+          DEBUG_SCREEN.print("0");
+        }
+        DEBUG_SCREEN.print(program_IO_data_register[i]); // Print value
+        if (i == 4 || i == 9)
+        {
+          DEBUG_SCREEN.println("");
+        }
       }
-      Serial.println(""); // New line after program counter
-      Serial.println("----------------------------------------------------");
+      DEBUG_SCREEN.println(""); // New line after program counter
+      DEBUG_SCREEN.println("----------------------IO STATUS---------------------");
+
+      DEBUG_SCREEN.print("INPUTS: ");
+      if (status::visual_debug_enable_inputs)
+      {
+        DEBUG_SCREEN.print(" ENABLED");
+      }
+      else
+      {
+        DEBUG_SCREEN.print("DISABLED");
+      }
+
+      DEBUG_SCREEN.print("                  ");
+
+      DEBUG_SCREEN.print("OUTPUTS: ");
+      if (status::visual_debug_enable_outputs)
+      {
+        DEBUG_SCREEN.print(" ENABLED");
+      }
+      else
+      {
+        DEBUG_SCREEN.print("DISABLED");
+      }
+      DEBUG_SCREEN.println("");
+      DEBUG_SCREEN.println("-------------------IO DEVICE MAP--------------------");
+
+      DEBUG_SCREEN.print("ADDON: ");
+
+      for (size_t i = 0; i < prog_data_register_size; i++)
+      {
+        if (setup::register_usage[i].pin_used_for_io)
+        { // show addon address
+          debug::print_pretty_hex(setup::register_usage[i].addon_address);
+          DEBUG_SCREEN.print("[");
+          DEBUG_SCREEN.print(setup::register_usage[i].addon_register);
+          if (setup::register_usage[i].addon_register <= 9)
+          {
+            DEBUG_SCREEN.print(" ");
+          }
+          DEBUG_SCREEN.print("]  ");
+        }
+      }
+      DEBUG_SCREEN.println("");
+      // Where the pointers will live
+      DEBUG_SCREEN.print("         ");
+
+      for (size_t i = 0; i < prog_data_register_size; i++)
+      {
+        if (setup::register_usage[i].pin_used_for_io)
+        { // Arrow to indicate data flow
+          if (setup::register_usage[i].dir == setup::REG_INPUT)
+          {
+            DEBUG_SCREEN.print("v");
+          }
+          else
+          {
+            DEBUG_SCREEN.print("^");
+          }
+          DEBUG_SCREEN.print("         ");
+        }
+      }
+
+      DEBUG_SCREEN.println("");
+
+      DEBUG_SCREEN.print("LOCAL: ");
+
+      for (size_t i = 0; i < prog_data_register_size; i++)
+      {
+        if (setup::register_usage[i].pin_used_for_io)
+        { // Show loacal register
+          DEBUG_SCREEN.print(" [");
+          DEBUG_SCREEN.print(i);
+          if (i <= 9)
+          {
+            DEBUG_SCREEN.print(" ");
+          }
+          DEBUG_SCREEN.print("]     ");
+        }
+      }
+
       if (status::visual_debug_enable_inputs)
       {
         update_input_devices(); // Read input devices
@@ -869,7 +971,7 @@ namespace cmd_interpreter
       {
         update_output_devices();
       }
-      delay(500); // debugging delay
+      delay(1000); // debugging delay
     }
   }
 } // Namespace
@@ -880,20 +982,35 @@ void setup_program_0()
 {
   test_program_0_setup[1].pin_used_for_io = true;
   test_program_0_setup[1].addon_address = 0x02;
-  test_program_0_setup[1].addon_register = 0;
+  test_program_0_setup[1].addon_register = 1;
   test_program_0_setup[1].dir = cmd_interpreter::setup::REG_OUTPUT;
 
   test_program_0_setup[2].pin_used_for_io = true;
-  test_program_0_setup[2].addon_address = 0x01;
-  test_program_0_setup[2].addon_register = 0;
+  test_program_0_setup[2].addon_address = 0x02;
+  test_program_0_setup[2].addon_register = 3;
   test_program_0_setup[2].dir = cmd_interpreter::setup::REG_INPUT;
+
+  test_program_0_setup[3].pin_used_for_io = true;
+  test_program_0_setup[3].addon_address = 0x02;
+  test_program_0_setup[3].addon_register = 3;
+  test_program_0_setup[3].dir = cmd_interpreter::setup::REG_INPUT;
+
+  test_program_0_setup[4].pin_used_for_io = true;
+  test_program_0_setup[4].addon_address = 0x02;
+  test_program_0_setup[4].addon_register = 3;
+  test_program_0_setup[4].dir = cmd_interpreter::setup::REG_INPUT;
+
+  test_program_0_setup[10].pin_used_for_io = true;
+  test_program_0_setup[10].addon_address = 0x02;
+  test_program_0_setup[10].addon_register = 2;
+  test_program_0_setup[10].dir = cmd_interpreter::setup::REG_OUTPUT;
 }
 
 volatile unsigned char test_program_0[cmd_interpreter::max_program_length][cmd_interpreter::max_instruction_args] = {
     // CMD,ARG,  ARG,  ARG
     0x02, 0x02, 0xFF, 0,    // 0 |SET Reg2 ->256
     0x09, 0xF2, 0x2, 0x02,  // 1 |reg 2 / 2 -> reg2
-    0xFF, 0, 0, 0,          // 2 |DUMP
+    0x0A, 0, 0, 0,          // 2 |DUMP
     0x01, 0xF2, 2, 0x40,    // 3 |IF reg2 < 2
     0x03, 0, 0, 0,          // 4 | goto 0 //reset the vals to keep deviding
     0x03, 1, 0, 0,          // 5 |goto 1  //skip setting the value
@@ -906,8 +1023,9 @@ volatile unsigned char test_program_0[cmd_interpreter::max_program_length][cmd_i
 
 void setup()
 {
-  Serial.begin(115200);
-  Serial.println("--G.S.L. STARTED--");
+  DEBUGGER_OUTPUT.begin(115200);
+  DEBUG_SCREEN.begin(115200);
+  DEBUGGER_OUTPUT.println("--G.S.L. STARTED--");
   // Setup the pins
   setup_program_0();                                                   // There is likely a better way to do this, but irl this will be on the fly loading, sooooo..... probbably good enough
   cmd_interpreter::load_program(test_program_0, test_program_0_setup); // Load program
@@ -915,5 +1033,6 @@ void setup()
 
 void loop()
 {
+
   cmd_interpreter::run();
 }
