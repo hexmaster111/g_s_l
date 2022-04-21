@@ -10,6 +10,7 @@ namespace cmd_interpreter
 
     const unsigned char NOP = 0x00;
     const unsigned char IF = 0x01;
+
     const unsigned char SRG = 0x02;
     const unsigned char GOTO = 0x03;
     const unsigned char INCR = 0x04;
@@ -263,7 +264,7 @@ namespace cmd_interpreter
       {
         for (uint8_t x = 0; x < max_instruction_args; x++)
         {
-          program_space[x][i] = prog[x][i]; // Copy in every step of the program
+          program_space[i][x] = prog[i][x]; // Copy in every step of the program
         }
       }
     }
@@ -652,11 +653,19 @@ namespace cmd_interpreter
 
       // dump the program to serial display, with PC having a pointer to the current instruction
       Serial.write(0xC); // clear the screen some
-      Serial.println("------DEBUGGER-------");
-      Serial.println("---------------------");
+      Serial.println("--PROG INSTRUCTIONS---|P|-----PROG BRAKE DOWN-------");
+      Serial.println("----------------------|C|INST|----------------------");
       for (size_t i = 0; i < cmd_interpreter::max_program_length; i++)
       { // for every instruction
         // Print the name
+
+        if (i <= 9) // make up for the missing 0
+        {
+          Serial.print("0");
+        }
+        Serial.print(i); // print the line number
+
+        Serial.print("|");
         debug::print_command_name(i);
 
         Serial.print(" "); // Space between cmd name and data
@@ -684,22 +693,162 @@ namespace cmd_interpreter
         debug::print_command_name(i); // cmd
         Serial.print(" ");            // space
 
-        for (size_t x = 0; x < max_instruction_args; x++)
-        { // print the cmd disection
-          if (cmd_interpreter::program_space[i][x] > 0xF0)
-          { // if loading from a register
-            Serial.print("REG [");
-            Serial.print(cmd_interpreter::program_space[i][x] - 0xF0); // register number
-            Serial.print("]");
+        if (cmd_interpreter::program_space[i][0] == cmds::IF)
+        {                                                  // if cmd
+          if (cmd_interpreter::program_space[i][1] > 0xF0) // arg 1
+          {
+            // ifcmd loading from a register
+            Serial.print("[");
+            Serial.print(cmd_interpreter::program_space[i][1] - 0xF0); // register number
+            Serial.print("] ");
           }
+          else
+          { // user is using a const value
+            Serial.print(" ");
+            Serial.print(cmd_interpreter::program_space[i][1]); // ABS value
+            Serial.print("  ");
+          }
+
+          // opperand
+          switch (cmd_interpreter::program_space[i][3])
+          {
+          case 0x10:
+            Serial.print("= ");
+            break;
+
+          case 0x20:
+            Serial.print("!=");
+            break;
+
+          case 0x30:
+            Serial.print("> ");
+            break;
+
+          case 0x31:
+            Serial.print(">=");
+            break;
+
+          case 0x40:
+            Serial.print("< ");
+            break;
+
+          case 0x41:
+            Serial.print("<=");
+            break;
+
+          default:
+            Serial.print("IN");
+            break;
+          }
+
+          if (cmd_interpreter::program_space[i][2] > 0xF0) // arg 2
+          {
+            // ifcmd loading from a register
+            Serial.print("[");
+            Serial.print(cmd_interpreter::program_space[i][2] - 0xF0); // register number
+            Serial.print("] ");
+          }
+          else
+          { // user is using a const value
+            Serial.print(" ");
+            Serial.print(cmd_interpreter::program_space[i][2]); // ABS value
+            Serial.print("  ");
+          }
+        }
+        else if (cmd_interpreter::program_space[i][0] == cmds::GOTO)
+        { // if cmd is goto, only print the raw number
+          Serial.print("->");
+          Serial.print(cmd_interpreter::program_space[i][1]);
+          if (cmd_interpreter::program_space[i][1] <= 9)
+          { // Add a space for the missing digit
+            Serial.print(" ");
+          }
+        }
+        else if (cmd_interpreter::program_space[i][0] == cmds::INCR || cmd_interpreter::program_space[i][0] == cmds::DECR)
+        {
+          Serial.print("[");
+          Serial.print(cmd_interpreter::program_space[i][1]);
+          Serial.print("]");
+        }
+        else if (cmd_interpreter::program_space[i][0] == cmds::ADD ||
+                 cmd_interpreter::program_space[i][0] == cmds::SUB ||
+                 cmd_interpreter::program_space[i][0] == cmds::MUT ||
+                 cmd_interpreter::program_space[i][0] == cmds::DIV)
+        {
+          if (cmd_interpreter::program_space[i][1] > 0xF0) // arg 1
+          {
+            // ifcmd loading from a register
+            Serial.print("[");
+            Serial.print(cmd_interpreter::program_space[i][1] - 0xF0); // register number
+            Serial.print("] ");
+          }
+          else
+          { // user is using a const value
+            Serial.print(" ");
+            Serial.print(cmd_interpreter::program_space[i][1]); // ABS value
+            Serial.print("  ");
+          }
+
+          switch (cmd_interpreter::program_space[i][0])
+          {
+          case cmds::ADD:
+            Serial.print("+");
+            break;
+          case cmds::SUB:
+            Serial.print("-");
+            break;
+          case cmds::MUT:
+            Serial.print("*");
+            break;
+          case cmds::DIV:
+            Serial.print("/");
+            break;
+
+          default:
+            Serial.print("?");
+            break;
+          }
+
+          // Opperation
+
+          if (cmd_interpreter::program_space[i][2] > 0xF0) // arg 1
+          {
+            // ifcmd loading from a register
+            Serial.print("[");
+            Serial.print(cmd_interpreter::program_space[i][2] - 0xF0); // register number
+            Serial.print("] ");
+          }
+          else
+          { // user is using a const value
+            Serial.print(" ");
+            Serial.print(cmd_interpreter::program_space[i][2]); // ABS value
+            Serial.print(" ");
+          }
+
+          // dest
+          Serial.print("->");
+
+          Serial.print("[");
+          Serial.print(cmd_interpreter::program_space[i][3]); // ABS value
+          Serial.print("]");
+        }
+        else if (cmd_interpreter::program_space[i][0] == cmds::SRG)
+        {
+          Serial.print("[");
+          Serial.print(cmd_interpreter::program_space[i][1]);
+          Serial.print("]");
+          Serial.print("<-");
+          Serial.print(" ");
+          Serial.print(cmd_interpreter::program_space[i][2]);
+          Serial.print(" ");
         }
 
         Serial.println(""); // NEW LINE
       }
 
       // Print the Current prog io register
-      Serial.println("---------------------");
-      Serial.println("IO REGISTERS");
+      Serial.println("----------------------------------------------------");
+      Serial.println("-------------------IO REGISTERS---------------------");
       for (size_t i = 0; i < prog_data_register_size; i++)
       { // For every element in the data register
         Serial.print("  [");
@@ -708,7 +857,7 @@ namespace cmd_interpreter
         Serial.print(program_IO_data_register[i]); // Print value
       }
       Serial.println(""); // New line after program counter
-
+      Serial.println("----------------------------------------------------");
       if (status::visual_debug_enable_inputs)
       {
         update_input_devices(); // Read input devices
@@ -720,7 +869,7 @@ namespace cmd_interpreter
       {
         update_output_devices();
       }
-      delay(1000); // debugging delay
+      delay(500); // debugging delay
     }
   }
 } // Namespace
@@ -742,16 +891,17 @@ void setup_program_0()
 
 volatile unsigned char test_program_0[cmd_interpreter::max_program_length][cmd_interpreter::max_instruction_args] = {
     // CMD,ARG,  ARG,  ARG
-    0x02, 0x02, 0xFF, 0,   // 0 |SET Reg2 ->256
-    0x09, 0xF2, 0x2, 0x02, // 1 |reg 2 / 2 -> reg2
-    0xFF, 0, 0, 0,         // 2 |DUMP
-    0x01, 0xF2, 2, 0x40,   // 3 |IF reg2 < 2
-    0x03, 0, 0, 0,         // 4 | goto 0 //reset the vals to keep deviding
-    0x03, 1, 0, 0,         // 5 |goto 1  //skip setting the value
-    0, 0, 0, 0,            // 6 |
-    0, 0, 0, 0,            // 7 |
-    0, 0, 0, 0,            // 8 |
-    0, 0, 0, 0             // 9 |
+    0x02, 0x02, 0xFF, 0,    // 0 |SET Reg2 ->256
+    0x09, 0xF2, 0x2, 0x02,  // 1 |reg 2 / 2 -> reg2
+    0xFF, 0, 0, 0,          // 2 |DUMP
+    0x01, 0xF2, 2, 0x40,    // 3 |IF reg2 < 2
+    0x03, 0, 0, 0,          // 4 | goto 0 //reset the vals to keep deviding
+    0x03, 1, 0, 0,          // 5 |goto 1  //skip setting the value
+    0xFF, 0, 0, 0,          // 6 |-------------Debugging tests below
+    0x01, 0x02, 0xF2, 0x10, // if
+    0x04, 0x02, 0, 0,       // incr
+    0x05, 0x02, 0, 0,       //
+    0x0A, 0, 0, 0           //
 };
 
 void setup()
